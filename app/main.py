@@ -1,31 +1,40 @@
 import os
 from dotenv import load_dotenv
 from groq import Groq
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
+from contextlib import asynccontextmanager
 
+from app.schemas import RoastRequest, RoastResponse
+from app.dependencies import get_groq_client
+from app.services.groq_client import get_roast
+from app.services.diffing import make_diff
 load_dotenv()
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+@asynccontextmanager
+async def lifespan(app:FastAPI):
+    # startup: create client once
+    app.state.groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+    yield
+    #shutdown: nothing to clear up for groq, but this is where you'd close DB/GPU resouorces
 
-app = FastAPI(title="Roast My Code")
+# app = FastAPI(title="Roast My Code")
+app = FastAPI(title="Roast My Code", lifespan=lifespan)
 
 @app.get("/")
 def read_root():
     return {"status": "ok"}
 
-@app.post("/roast")
-def roast_code(code: str):
-    prompt = f"""Roast this code sarcastically but usefully. 
-Give a genuine technical review after the roast.
 
-Code:
-{code}
-"""
+@app.post("/roast", response_model=RoastResponse)
+def roast_code(payload: RoastRequest, client: Groq = Depends(get_groq_client)):
+    result = get_roast(client, payload.code, payload.language)
+    diff = make_diff(payload.code, result["improved_code"])
 
-    response = client.chat.completions.create(
-        model = "openai/gpt-oss-120b",
-        messages=[{'role': 'user', "content": prompt}]
+    return RoastResponse(
+        roast_score=result["roast_score"],
+        roast=result["roast"],
+        review=result["review"],
+        suggestions=result["suggestions"],
+        improved_code=result["improved_code"],
+        diff=diff,
     )
-    return {"result": response.choices[0].message.content}
-
-
