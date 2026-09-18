@@ -1,5 +1,6 @@
 import json
-from groq import Groq
+from groq import Groq,AsyncGroq
+from typing import AsyncGenerator
 
 PROMPT_TEMPLATE = """You are a witty senior engineer reviewing code.
 Roast this {language} code sarcastically but usefully, then give a genuine
@@ -18,6 +19,12 @@ Code:
 {code}
 """
 
+STREAM_PROMPT_TEMPLATE = """You are a witty senior engineer. Roast this
+{language} code sarcastically but usefully, in plain text (no JSON, no markdown).
+
+Code:
+{code}
+"""
 
 def get_roast(client: Groq, code: str, language: str) -> dict:
     prompt = PROMPT_TEMPLATE.format(language=language, code=code)
@@ -27,3 +34,16 @@ def get_roast(client: Groq, code: str, language: str) -> dict:
         response_format={"type": "json_object"},
     )
     return json.loads(response.choices[0].message.content)
+
+
+async def stream_roast(client: AsyncGroq, code: str, language: str) -> AsyncGenerator[str, None]:
+    prompt = STREAM_PROMPT_TEMPLATE.format(language=language, code=code)
+    stream = await client.chat.completions.create(
+        model="openai/gpt-oss-120b",
+        messages=[{"role": "user", "content": prompt}],
+        stream=True,
+    )
+    async for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
